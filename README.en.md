@@ -51,7 +51,7 @@ services:
     environment:
       HTTP_PORT: 8086
       MATTER_PORT: 5540
-      MTTL_GROUP_OUTLETS: "0"
+      MTTL_GROUP_OUTLETS: 0
       MTTL_POLL_INTERVAL_MS: 10000
       MTTL_RESPONSE_TIMEOUT_MS: 3000
     volumes:
