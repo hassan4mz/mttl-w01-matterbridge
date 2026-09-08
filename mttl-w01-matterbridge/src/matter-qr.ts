@@ -12,8 +12,10 @@ export function matterQrSvg(payload: string) {
     const cells = [...line].slice(1, 22);
     cells.forEach((cell, x) => {
       const topY = pairY * 2;
-      if (topY < 21) modules[topY][x] = cell === "█" || cell === "▀";
-      if (topY + 1 < 21) modules[topY + 1][x] = cell === "█" || cell === "▄";
+      // matter.js draws light modules with terminal blocks. SVG uses a white
+      // background, so those blocks must become white, not black.
+      if (topY < 21) modules[topY][x] = cell !== "█" && cell !== "▀";
+      if (topY + 1 < 21) modules[topY + 1][x] = cell !== "█" && cell !== "▄";
     });
   });
 
@@ -28,9 +30,9 @@ export function matterQrSvg(payload: string) {
 
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" shape-rendering="crispEdges" role="img" aria-label="Matter commissioning QR code">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size * 16}" height="${size * 16}" viewBox="0 0 ${size} ${size}" shape-rendering="crispEdges" role="img" aria-label="Matter commissioning QR code">`,
     `<rect width="${size}" height="${size}" fill="#fff"/>`,
-    `<path d="${path.join("")}" fill="#101827"/>`,
+    `<path d="${path.join("")}" fill="#000"/>`,
     `</svg>`,
   ].join("");
 }

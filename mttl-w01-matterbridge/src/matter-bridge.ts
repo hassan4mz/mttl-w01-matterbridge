@@ -1,8 +1,11 @@
 import { Endpoint, Environment, ServerNode, VendorId } from "@matter/main";
 import {
+  DescriptorServer,
   ElectricalEnergyMeasurementServer,
   ElectricalPowerMeasurementServer,
+  FixedLabelServer,
   PowerTopologyServer,
+  TemperatureMeasurementServer,
 } from "@matter/main/behaviors";
 import {
   ElectricalEnergyMeasurement,
@@ -12,6 +15,7 @@ import {
 import {
   OnOffPlugInUnitDevice,
   OnOffPlugInUnitRequirements,
+  TemperatureSensorDevice,
 } from "@matter/main/devices";
 import {
   AggregatorEndpoint,
@@ -131,7 +135,7 @@ interface ManagedPowerStrip {
 // + PowerTopology to associate EPM/EEM measurements with the application
 // endpoint.  TREE topology means the ElectricalSensor endpoint's PartsList
 // identifies the outlet endpoint it measures.
-const SmartThingsElectricalSensor = ElectricalSensorEndpoint.with(
+const electricalMeasurementServers = [
   PowerTopologyServer.with(PowerTopology.Feature.TreeTopology),
   ElectricalPowerMeasurementServer.with(
     ElectricalPowerMeasurement.Feature.AlternatingCurrent,
@@ -140,6 +144,17 @@ const SmartThingsElectricalSensor = ElectricalSensorEndpoint.with(
     ElectricalEnergyMeasurement.Feature.ImportedEnergy,
     ElectricalEnergyMeasurement.Feature.CumulativeEnergy,
   ),
+] as const;
+
+const SmartThingsElectricalSensor = ElectricalSensorEndpoint.with(...electricalMeasurementServers);
+
+// Leaf endpoints measure themselves. Only the strip has a PartsList, so HA
+// resolves all four outlets and their measurements to the same composed device.
+const HomeAssistantOutletDevice = PhysicalOutletDevice.with(
+  DescriptorServer,
+  ...electricalMeasurementServers,
+  TemperatureMeasurementServer,
+  FixedLabelServer,
 );
 
 const genericAccuracy = {
@@ -155,7 +170,26 @@ const genericAccuracy = {
   ],
 };
 
-function createOutlet(id: string) {
+function createOutlet(id: string, isGroupByDevice: boolean, index: number): Endpoint<any> {
+  if (isGroupByDevice) {
+    return new Endpoint(HomeAssistantOutletDevice, {
+      id,
+      onOff: { onOff: false },
+      ...electricalMeasurementOptions(),
+      descriptor: {
+        deviceTypeList: [PhysicalOutletDevice, TemperatureSensorDevice].map(type => ({
+          deviceType: type.deviceType,
+          revision: type.deviceRevision,
+        })),
+      },
+      fixedLabel: { labelList: [{ label: "ha_entitylabel", value: `Outlet ${index}` }] },
+      temperatureMeasurement: {
+        measuredValue: null,
+        minMeasuredValue: null,
+        maxMeasuredValue: null,
+      },
+    });
+  }
   return new Endpoint(PhysicalOutletDevice, {
     id,
     onOff: {
@@ -167,6 +201,12 @@ function createOutlet(id: string) {
 function createElectricalSensor(id: string) {
   return new Endpoint(SmartThingsElectricalSensor, {
     id,
+    ...electricalMeasurementOptions(),
+  });
+}
+
+function electricalMeasurementOptions() {
+  return {
     powerTopology: {},
     electricalPowerMeasurement: {
       activePower: 0,
@@ -185,7 +225,7 @@ function createElectricalSensor(id: string) {
         ...genericAccuracy,
       },
     },
-  });
+  };
 }
 
 export class MatterPowerStripBridge {
@@ -201,6 +241,7 @@ export class MatterPowerStripBridge {
     aggregator: Endpoint<any>,
     onOutletCommand?: OutletCommandHandler,
     private readonly registry?: DeviceRegistry,
+    private readonly isGroupByDevice = false,
   ) {
     this.server = server;
     this.aggregator = aggregator;
@@ -214,6 +255,7 @@ export class MatterPowerStripBridge {
     onOutletCommand?: OutletCommandHandler;
     registry?: DeviceRegistry;
     environment?: Environment;
+    isGroupByDevice?: boolean;
   }) {
     const server = await ServerNode.create({
       id: "powerstrip-bridge",
@@ -251,6 +293,7 @@ export class MatterPowerStripBridge {
       aggregator,
       options?.onOutletCommand,
       options?.registry,
+      options?.isGroupByDevice,
     );
   }
 
@@ -288,22 +331,13 @@ export class MatterPowerStripBridge {
         await device.outlets[index].set({
           onOff: { onOff: outletStates[index] },
         });
-
-        const sample = device.telemetry.outlets[index];
-        const electricalSensor = device.electricalSensors[index];
-        await electricalSensor.set({
-          electricalPowerMeasurement: {
-            activePower: Math.round(sample.powerW * 1_000),
-          },
-        });
-        await electricalSensor.act(agent =>
-          agent.get(ElectricalEnergyMeasurementServer).setMeasurement({
-            cumulativeEnergy: {
-              imported: { energy: Math.round(sample.energyWh * 1_000) },
-            },
-          }),
-        );
       }
+      await this.updateTelemetry(device.id, {
+        outlets: device.telemetry.outlets.map((sample, index) => ({
+          ...sample,
+          index: index + 1,
+        })),
+      });
     }
   }
 
@@ -326,6 +360,11 @@ export class MatterPowerStripBridge {
         productLabel: name,
         serialNumber,
         reachable,
+        ...(this.isGroupByDevice ? {
+          vendorId: VendorId(0xfff1),
+          productId: 0x8001,
+          softwareVersionString: options.firmwareVersion?.slice(0, 64) ?? "Unknown",
+        } : {}),
       },
     });
 
@@ -334,11 +373,12 @@ export class MatterPowerStripBridge {
     const outlets: Endpoint<any>[] = [];
     const electricalSensors: Endpoint<any>[] = [];
     for (let i = 1; i <= 4; i++) {
-      const electricalSensor = createElectricalSensor(`${id}-electrical-${i}`);
+      const outlet = createOutlet(`${id}-outlet-${i}`, this.isGroupByDevice, i);
+      const electricalSensor = this.isGroupByDevice
+        ? outlet
+        : createElectricalSensor(`${id}-electrical-${i}`);
       await container.add(electricalSensor);
-
-      const outlet = createOutlet(`${id}-outlet-${i}`);
-      await electricalSensor.add(outlet);
+      if (!this.isGroupByDevice) await electricalSensor.add(outlet);
       if (this.onOutletCommand) {
         outletCommandBindings.set(outlet, {
           deviceId: id,
@@ -452,6 +492,18 @@ export class MatterPowerStripBridge {
         }),
       );
 
+      if (this.isGroupByDevice && sample.temperatureC !== undefined) {
+        const measuredValue = Math.round(sample.temperatureC * 100);
+        await electricalSensor.set({
+          temperatureMeasurement: {
+            // Invalid firmware readings must not prevent power/relay updates.
+            measuredValue:
+              Number.isFinite(measuredValue) && measuredValue >= -27315 && measuredValue <= 32767
+                ? measuredValue : null,
+          },
+        });
+      }
+
       const previousSample = device.telemetry.outlets[sample.index - 1];
       const { index: _index, on: _on, ...measurements } = sample;
       device.telemetry.outlets[sample.index - 1] = {
@@ -499,6 +551,11 @@ export class MatterPowerStripBridge {
 
   async setFirmwareVersion(id: string, version: string) {
     const device = this.requireDevice(id);
+    if (this.isGroupByDevice) {
+      await device.container.set({
+        bridgedDeviceBasicInformation: { softwareVersionString: version.slice(0, 64) },
+      });
+    }
     await this.registry?.upsert({
       id: device.id,
       name: device.name,

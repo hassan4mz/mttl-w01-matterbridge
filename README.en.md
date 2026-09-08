@@ -51,6 +51,7 @@ services:
     environment:
       HTTP_PORT: 8086
       MATTER_PORT: 5540
+      MTTL_GROUP_OUTLETS: "0"
       MTTL_POLL_INTERVAL_MS: 10000
       MTTL_RESPONSE_TIMEOUT_MS: 3000
     volumes:
@@ -73,6 +74,8 @@ To change the server ports:
 
 - If another Matter service is already running on the same server, change `MATTER_PORT`, for example to `MATTER_PORT: 5541`.
 - To change the web dashboard port, set `HTTP_PORT`, for example to `HTTP_PORT: 8080`, and open `http://{SERVER_IP}:8080`.
+- When using with HomeAssistant, set the following environment variable to configure each power strip as a single device.
+    - Ex) `MTTL_GROUP_OUTLETS: 1`
 
 ## 3. Configure the power strip’s Wi-Fi and server address
 

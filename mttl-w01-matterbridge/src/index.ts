@@ -17,6 +17,7 @@ const registeredDevices = await registry.load();
 let tcpServer: TcpDeviceServer;
 const bridge = await MatterPowerStripBridge.create({
   matterPort,
+  isGroupByDevice: process.env.MTTL_GROUP_OUTLETS == "1",
   passcode: envNumber("MATTER_PASSCODE", 20202021),
   discriminator: envNumber("MATTER_DISCRIMINATOR", 3840),
   registry,

@@ -51,6 +51,7 @@ services:
     environment:
       HTTP_PORT: 8086
       MATTER_PORT: 5540
+      MTTL_GROUP_OUTLETS: 0
       MTTL_POLL_INTERVAL_MS: 10000
       MTTL_RESPONSE_TIMEOUT_MS: 3000
     volumes:
@@ -76,6 +77,8 @@ docker compose up -d
  - 웹 대시보드 서버 포트도 다음 환경변수로 변경 가능합니다.
     - 예) `HTTP_PORT: 8080` (`http://{서버IP주소}:8080` 접속)
 
+ - HomeAssistant와 함께 사용시 다음 환경변수를 설정하면 각 멀티탭을 단일 장치로 구성합니다.
+    - 예) `MTTL_GROUP_OUTLETS: 1`
 
 ## 3. 멀티탭 Wi-Fi와 서버 주소 설정하기
 
